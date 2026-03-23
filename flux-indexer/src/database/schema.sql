@@ -42,7 +42,8 @@ ORDER BY (height)
 PARTITION BY intDiv(height, 100000)
 SETTINGS index_granularity = 8192,
          min_bytes_for_wide_part = 0,
-         min_rows_for_wide_part = 0;
+         min_rows_for_wide_part = 0,
+         deduplicate_merge_projection_mode = 'drop';
 
 -- Projection for hash lookups (O(1) instead of O(log n))
 ALTER TABLE blocks ADD PROJECTION IF NOT EXISTS proj_by_hash (
@@ -92,7 +93,8 @@ CREATE TABLE IF NOT EXISTS transactions (
 ORDER BY (txid)
 PARTITION BY intDiv(block_height, 100000)
 TTL toDateTime(timestamp) + INTERVAL 7 DAY RECOMPRESS CODEC(ZSTD(9))
-SETTINGS index_granularity = 8192;
+SETTINGS index_granularity = 8192,
+         deduplicate_merge_projection_mode = 'drop';
 
 -- NOTE: proj_by_txid is NOT needed - table is already ORDER BY txid
 -- Redundant projection would waste ~10GB of storage
@@ -129,7 +131,8 @@ CREATE TABLE IF NOT EXISTS utxos (
 ) ENGINE = ReplacingMergeTree(version)
 ORDER BY (txid, vout)
 PARTITION BY intDiv(block_height, 100000)
-SETTINGS index_granularity = 4096;
+SETTINGS index_granularity = 4096,
+         deduplicate_merge_projection_mode = 'drop';
 
 -- Projection for address UTXO queries - CRITICAL for wallet balance
 ALTER TABLE utxos ADD PROJECTION IF NOT EXISTS proj_by_address (
@@ -174,7 +177,8 @@ CREATE TABLE IF NOT EXISTS address_transactions (
 ORDER BY (address, txid)
 PARTITION BY intDiv(block_height, 100000)
 TTL toDateTime(timestamp) + INTERVAL 7 DAY RECOMPRESS CODEC(ZSTD(9))
-SETTINGS index_granularity = 8192;
+SETTINGS index_granularity = 8192,
+         deduplicate_merge_projection_mode = 'drop';
 
 -- Projection for txid lookup within address context
 ALTER TABLE address_transactions ADD PROJECTION IF NOT EXISTS proj_by_txid (
@@ -306,7 +310,8 @@ CREATE TABLE IF NOT EXISTS fluxnode_transactions (
 ORDER BY (txid)
 PARTITION BY intDiv(block_height, 100000)
 TTL block_time + INTERVAL 7 DAY RECOMPRESS CODEC(ZSTD(9))
-SETTINGS index_granularity = 8192;
+SETTINGS index_granularity = 8192,
+         deduplicate_merge_projection_mode = 'drop';
 
 -- Projection for IP lookups - ONLY includes columns needed by getFluxNodeStatus API
 -- Excludes signature (~200 bytes) and extra_data to save ~14GB vs SELECT *
@@ -345,7 +350,8 @@ CREATE TABLE IF NOT EXISTS live_fluxnodes (
     _version UInt64 DEFAULT toUnixTimestamp64Milli(now64()) CODEC(Delta, LZ4)
 ) ENGINE = ReplacingMergeTree(_version)
 ORDER BY (address)
-SETTINGS index_granularity = 8192;
+SETTINGS index_granularity = 8192,
+         deduplicate_merge_projection_mode = 'drop';
 
 -- Projection for rich list queries (by total collateral)
 ALTER TABLE live_fluxnodes ADD PROJECTION IF NOT EXISTS proj_by_collateral (
@@ -368,7 +374,8 @@ CREATE TABLE IF NOT EXISTS producers (
     updated_at DateTime DEFAULT now() CODEC(Delta, LZ4)
 ) ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY (fluxnode)
-SETTINGS index_granularity = 8192;
+SETTINGS index_granularity = 8192,
+         deduplicate_merge_projection_mode = 'drop';
 
 -- Projection for producer leaderboard
 ALTER TABLE producers ADD PROJECTION IF NOT EXISTS proj_leaderboard (
