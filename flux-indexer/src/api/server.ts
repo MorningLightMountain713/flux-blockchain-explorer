@@ -91,6 +91,11 @@ export class ClickHouseAPIServer {
     this.app.get('/api/v1/analytics/tx-volume', this.getTxVolumeHistory.bind(this));
     this.app.get('/api/v1/analytics/supply-history', this.getSupplyHistory.bind(this));
 
+    // Sapling endpoints (for shielded wallet support)
+    this.app.get('/api/v1/sapling/commitments', this.getSaplingCommitments.bind(this));
+    this.app.get('/api/v1/sapling/nullifiers', this.getSaplingNullifiers.bind(this));
+    this.app.get('/api/v1/sapling/tree-state/:height', this.getSaplingTreeState.bind(this));
+
     // Health check
     this.app.get('/health', (req, res) => {
       res.json({ status: 'ok', backend: 'clickhouse', timestamp: new Date().toISOString() });
@@ -1914,6 +1919,90 @@ export class ClickHouseAPIServer {
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  }
+
+  // ========== Sapling Endpoints ==========
+
+  private async getSaplingCommitments(req: Request, res: Response): Promise<void> {
+    try {
+      const from = parseInt(req.query.from as string) || 250000;
+      const to = parseInt(req.query.to as string) || 99999999;
+      const limit = Math.min(parseInt(req.query.limit as string) || 10000, 100000);
+      const offset = parseInt(req.query.offset as string) || 0;
+
+      const rows = await this.ch.query<{
+        block_height: number;
+        txid: string;
+        output_index: number;
+        cmu: string;
+        ephemeral_key: string;
+        enc_ciphertext: string;
+        timestamp: number;
+      }>(`
+        SELECT block_height, txid, output_index, cmu, ephemeral_key, enc_ciphertext, timestamp
+        FROM sapling_commitments
+        WHERE block_height >= {from:UInt32} AND block_height <= {to:UInt32}
+          AND is_valid = 1
+        ORDER BY block_height ASC, txid ASC, output_index ASC
+        LIMIT {limit:UInt32} OFFSET {offset:UInt32}
+      `, { from, to, limit, offset });
+      res.json({ commitments: rows, count: rows.length });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch Sapling commitments' });
+    }
+  }
+
+  private async getSaplingNullifiers(req: Request, res: Response): Promise<void> {
+    try {
+      const from = parseInt(req.query.from as string) || 250000;
+      const to = parseInt(req.query.to as string) || 99999999;
+      const limit = Math.min(parseInt(req.query.limit as string) || 10000, 100000);
+      const offset = parseInt(req.query.offset as string) || 0;
+
+      const rows = await this.ch.query<{
+        block_height: number;
+        txid: string;
+        spend_index: number;
+        nullifier: string;
+        anchor: string;
+        timestamp: number;
+      }>(`
+        SELECT block_height, txid, spend_index, nullifier, anchor, timestamp
+        FROM sapling_nullifiers
+        WHERE block_height >= {from:UInt32} AND block_height <= {to:UInt32}
+          AND is_valid = 1
+        ORDER BY block_height ASC, txid ASC, spend_index ASC
+        LIMIT {limit:UInt32} OFFSET {offset:UInt32}
+      `, { from, to, limit, offset });
+      res.json({ nullifiers: rows, count: rows.length });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch Sapling nullifiers' });
+    }
+  }
+
+  private async getSaplingTreeState(req: Request, res: Response): Promise<void> {
+    try {
+      const height = parseInt(req.params.height);
+      if (isNaN(height) || height < 0) {
+        res.status(400).json({ error: 'Invalid height' });
+        return;
+      }
+
+      const row = await this.ch.queryOne<{ height: number; sapling_root: string }>(`
+        SELECT height, sapling_root
+        FROM blocks
+        WHERE height = {height:UInt32} AND is_valid = 1
+        LIMIT 1
+      `, { height });
+
+      if (!row) {
+        res.status(404).json({ error: 'Block not found' });
+        return;
+      }
+      res.json(row);
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch Sapling tree state' });
     }
   }
 

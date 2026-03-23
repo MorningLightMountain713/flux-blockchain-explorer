@@ -78,6 +78,7 @@ export interface BlockInsert {
   producerReward: string | bigint | null;
   difficulty: number | null;
   chainwork: string | null;
+  saplingRoot?: string | null;
 }
 
 export async function bulkInsertBlocks(
@@ -103,6 +104,7 @@ export async function bulkInsertBlocks(
     producer_reward: toBigIntString(b.producerReward),
     difficulty: b.difficulty || 0,
     chainwork: b.chainwork || '',
+    sapling_root: padHash(b.saplingRoot),
     is_valid: 1,
     _version: version,
   }));
@@ -622,6 +624,84 @@ export async function getSyncState(
 }
 
 // ============================================================================
+// Sapling Operations
+// ============================================================================
+
+export interface SaplingCommitmentInsert {
+  blockHeight: number;
+  txid: string;
+  outputIndex: number;
+  cmu: string;
+  ephemeralKey: string;
+  encCiphertext: string;
+  timestamp: number;
+}
+
+export async function bulkInsertSaplingCommitments(
+  ch: ClickHouseConnection,
+  commitments: SaplingCommitmentInsert[],
+  options?: { sync?: boolean }
+): Promise<number> {
+  if (commitments.length === 0) return 0;
+
+  const version = getVersion();
+  const rows = commitments.map((c) => ({
+    block_height: c.blockHeight,
+    txid: padHash(c.txid),
+    output_index: c.outputIndex,
+    cmu: padHash(c.cmu),
+    ephemeral_key: padHash(c.ephemeralKey),
+    enc_ciphertext: c.encCiphertext,
+    timestamp: c.timestamp,
+    is_valid: 1,
+    _version: version,
+  }));
+
+  if (options?.sync) {
+    await ch.syncInsert('sapling_commitments', rows);
+  } else {
+    await ch.insert('sapling_commitments', rows);
+  }
+  return commitments.length;
+}
+
+export interface SaplingNullifierInsert {
+  blockHeight: number;
+  txid: string;
+  spendIndex: number;
+  nullifier: string;
+  anchor: string;
+  timestamp: number;
+}
+
+export async function bulkInsertSaplingNullifiers(
+  ch: ClickHouseConnection,
+  nullifiers: SaplingNullifierInsert[],
+  options?: { sync?: boolean }
+): Promise<number> {
+  if (nullifiers.length === 0) return 0;
+
+  const version = getVersion();
+  const rows = nullifiers.map((n) => ({
+    block_height: n.blockHeight,
+    txid: padHash(n.txid),
+    spend_index: n.spendIndex,
+    nullifier: padHash(n.nullifier),
+    anchor: padHash(n.anchor),
+    timestamp: n.timestamp,
+    is_valid: 1,
+    _version: version,
+  }));
+
+  if (options?.sync) {
+    await ch.syncInsert('sapling_nullifiers', rows);
+  } else {
+    await ch.insert('sapling_nullifiers', rows);
+  }
+  return nullifiers.length;
+}
+
+// ============================================================================
 // Reorg Operations
 // ============================================================================
 
@@ -680,6 +760,18 @@ export async function invalidateFromHeight(
   // Invalidate fluxnode_transactions
   await ch.command(`
     ALTER TABLE fluxnode_transactions UPDATE is_valid = 0
+    WHERE block_height >= ${fromHeight} AND is_valid = 1
+  `);
+
+  // Invalidate sapling_commitments
+  await ch.command(`
+    ALTER TABLE sapling_commitments UPDATE is_valid = 0
+    WHERE block_height >= ${fromHeight} AND is_valid = 1
+  `);
+
+  // Invalidate sapling_nullifiers
+  await ch.command(`
+    ALTER TABLE sapling_nullifiers UPDATE is_valid = 0
     WHERE block_height >= ${fromHeight} AND is_valid = 1
   `);
 

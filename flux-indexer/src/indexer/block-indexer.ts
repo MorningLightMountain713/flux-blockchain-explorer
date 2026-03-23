@@ -16,6 +16,8 @@ import {
   extractTransactionFromBlock,
   scanBlockTransactions,
   parseTransactionShieldedData,
+  SaplingCommitmentData,
+  SaplingNullifierData,
 } from '../parsers/block-parser';
 import {
   bulkInsertBlocks,
@@ -29,6 +31,8 @@ import {
   bulkUpdateProducers,
   updateSyncState,
   fetchExistingUtxos,
+  bulkInsertSaplingCommitments,
+  bulkInsertSaplingNullifiers,
   BlockInsert,
   TransactionInsert,
   UtxoInsert,
@@ -39,6 +43,8 @@ import {
   SupplyStatsInsert,
   FluxnodeTransactionInsert,
   ProducerUpdate,
+  SaplingCommitmentInsert,
+  SaplingNullifierInsert,
 } from '../database/bulk-loader';
 
 // Memory profiling
@@ -436,7 +442,7 @@ export class ClickHouseBlockIndexer {
 
     // Maps for parsed data
     let txHexMap: Map<string, string> | null = new Map<string, string>();
-    let parsedShieldedData: Map<string, { vjoinsplit?: Array<{ vpub_old: bigint; vpub_new: bigint }>; valueBalance?: bigint }> | null = new Map();
+    let parsedShieldedData: Map<string, { vjoinsplit?: Array<{ vpub_old: bigint; vpub_new: bigint }>; valueBalance?: bigint; saplingCommitments?: SaplingCommitmentData[]; saplingNullifiers?: SaplingNullifierData[] }> | null = new Map();
     let parsedFluxNodeData: Map<string, {
       type: number;
       collateralHash?: string;
@@ -514,7 +520,7 @@ export class ClickHouseBlockIndexer {
           // Parse shielded data for v2/v4 transactions
           if (tx.version === 2 || tx.version === 4) {
             const shieldedData = parseTransactionShieldedData(scanned.hex);
-            if (shieldedData.vjoinsplit || shieldedData.valueBalance !== undefined) {
+            if (shieldedData.vjoinsplit || shieldedData.valueBalance !== undefined || shieldedData.saplingCommitments || shieldedData.saplingNullifiers) {
               parsedShieldedData!.set(tx.txid, shieldedData);
             }
           }
@@ -550,7 +556,7 @@ export class ClickHouseBlockIndexer {
               txHexMap!.set(tx.txid, txHex);
               if (tx.version === 2 || tx.version === 4) {
                 const shieldedData = parseTransactionShieldedData(txHex);
-                if (shieldedData.vjoinsplit || shieldedData.valueBalance !== undefined) {
+                if (shieldedData.vjoinsplit || shieldedData.valueBalance !== undefined || shieldedData.saplingCommitments || shieldedData.saplingNullifiers) {
                   parsedShieldedData!.set(tx.txid, shieldedData);
                 }
               }
@@ -622,6 +628,10 @@ export class ClickHouseBlockIndexer {
     // Supply tracking per block (includes timestamp for accurate date grouping in materialized views)
     const supplyChanges: Array<{ height: number; timestamp: number; coinbaseReward: bigint; shieldedChange: bigint }> = [];
 
+    // Sapling data collection
+    const saplingCommitmentRecords: SaplingCommitmentInsert[] = [];
+    const saplingNullifierRecords: SaplingNullifierInsert[] = [];
+
     // First pass: collect all data
     let currentHeight = startHeight;
     for (const block of blocks) {
@@ -634,6 +644,13 @@ export class ClickHouseBlockIndexer {
       if (!transactions || transactions.length === 0 || typeof transactions[0] === 'string') {
         currentHeight++;
         continue;
+      }
+
+      // Extract sapling_root from raw block hex (at byte offset 68: 4 version + 32 prevhash + 32 merkle_root)
+      let saplingRoot: string | null = null;
+      const rawHex = blockRawHexMap!.get(block.hash);
+      if (rawHex && rawHex.length >= (68 + 32) * 2) {
+        saplingRoot = rawHex.slice(68 * 2, (68 + 32) * 2);
       }
 
       blockRecords.push({
@@ -651,6 +668,7 @@ export class ClickHouseBlockIndexer {
         producerReward: block.producerReward ? BigInt(Math.round(block.producerReward * 1e8)) : null,
         difficulty: block.difficulty ?? null,
         chainwork: block.chainwork || null,
+        saplingRoot,
       });
 
       // Track supply changes
@@ -830,7 +848,7 @@ export class ClickHouseBlockIndexer {
           blockCoinbaseReward = outputTotal;
         }
 
-        // Extract shielded pool changes
+        // Extract shielded pool changes and Sapling data
         if (tx.version === 2 || tx.version === 4) {
           const shieldedData = parsedShieldedData!.get(tx.txid);
           if (shieldedData) {
@@ -851,6 +869,35 @@ export class ClickHouseBlockIndexer {
               const absValueBalance = shieldedData.valueBalance < BigInt(0) ? -shieldedData.valueBalance : shieldedData.valueBalance;
               if (absValueBalance <= MAX_REASONABLE_VALUE) {
                 blockShieldedChange -= shieldedData.valueBalance;
+              }
+            }
+
+            // Collect Sapling commitments
+            if (shieldedData.saplingCommitments) {
+              for (const commitment of shieldedData.saplingCommitments) {
+                saplingCommitmentRecords.push({
+                  blockHeight: currentHeight,
+                  txid: tx.txid,
+                  outputIndex: commitment.output_index,
+                  cmu: commitment.cmu,
+                  ephemeralKey: commitment.ephemeral_key,
+                  encCiphertext: commitment.enc_ciphertext,
+                  timestamp: block.time,
+                });
+              }
+            }
+
+            // Collect Sapling nullifiers
+            if (shieldedData.saplingNullifiers) {
+              for (const nullifier of shieldedData.saplingNullifiers) {
+                saplingNullifierRecords.push({
+                  blockHeight: currentHeight,
+                  txid: tx.txid,
+                  spendIndex: nullifier.spend_index,
+                  nullifier: nullifier.nullifier,
+                  anchor: nullifier.anchor,
+                  timestamp: block.time,
+                });
               }
             }
           }
@@ -1101,6 +1148,17 @@ export class ClickHouseBlockIndexer {
       });
       await bulkInsertFluxnodeTransactions(this.ch, fluxnodeRecords, { sync: useSyncFluxnode });
       timings.fluxnode = Date.now() - t0; t0 = Date.now();
+    }
+
+    // Insert Sapling commitments and nullifiers
+    if (saplingCommitmentRecords.length > 0) {
+      await bulkInsertSaplingCommitments(this.ch, saplingCommitmentRecords, { sync: useSync });
+      timings.saplingCommitments = Date.now() - t0; t0 = Date.now();
+    }
+
+    if (saplingNullifierRecords.length > 0) {
+      await bulkInsertSaplingNullifiers(this.ch, saplingNullifierRecords, { sync: useSync });
+      timings.saplingNullifiers = Date.now() - t0; t0 = Date.now();
     }
 
     await bulkInsertUtxos(this.ch, utxoRecords);

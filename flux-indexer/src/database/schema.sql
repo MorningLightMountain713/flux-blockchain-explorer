@@ -417,6 +417,57 @@ SETTINGS index_granularity = 8192;
 
 
 -- ============================================================================
+-- SAPLING_COMMITMENTS TABLE
+-- Note commitments from Sapling shielded outputs for wallet scanning
+-- Primary access: by height range (bulk download for wallet sync)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS sapling_commitments (
+    block_height UInt32 CODEC(Delta(4), ZSTD(3)),
+    txid FixedString(64) CODEC(ZSTD(3)),
+    output_index UInt16 CODEC(LZ4),
+    cmu FixedString(64) CODEC(ZSTD(3)),
+    ephemeral_key FixedString(64) CODEC(ZSTD(3)),
+    enc_ciphertext String CODEC(ZSTD(3)),
+    timestamp UInt32 CODEC(Delta(4), ZSTD(3)),
+    is_valid UInt8 DEFAULT 1,
+    _version UInt64 DEFAULT toUnixTimestamp64Milli(now64()) CODEC(Delta(8), ZSTD(3))
+) ENGINE = ReplacingMergeTree(_version)
+ORDER BY (block_height, txid, output_index)
+PARTITION BY intDiv(block_height, 100000)
+SETTINGS index_granularity = 8192;
+
+ALTER TABLE sapling_commitments ADD INDEX IF NOT EXISTS idx_cmu (cmu) TYPE bloom_filter(0.01) GRANULARITY 1;
+ALTER TABLE sapling_commitments ADD INDEX IF NOT EXISTS idx_is_valid (is_valid) TYPE set(2) GRANULARITY 1;
+
+
+-- ============================================================================
+-- SAPLING_NULLIFIERS TABLE
+-- Nullifiers from Sapling shielded spends for spent-note detection
+-- Primary access: by height range (bulk download for wallet sync)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS sapling_nullifiers (
+    block_height UInt32 CODEC(Delta(4), ZSTD(3)),
+    txid FixedString(64) CODEC(ZSTD(3)),
+    spend_index UInt16 CODEC(LZ4),
+    nullifier FixedString(64) CODEC(ZSTD(3)),
+    anchor FixedString(64) CODEC(ZSTD(3)),
+    timestamp UInt32 CODEC(Delta(4), ZSTD(3)),
+    is_valid UInt8 DEFAULT 1,
+    _version UInt64 DEFAULT toUnixTimestamp64Milli(now64()) CODEC(Delta(8), ZSTD(3))
+) ENGINE = ReplacingMergeTree(_version)
+ORDER BY (block_height, txid, spend_index)
+PARTITION BY intDiv(block_height, 100000)
+SETTINGS index_granularity = 8192;
+
+ALTER TABLE sapling_nullifiers ADD INDEX IF NOT EXISTS idx_nullifier (nullifier) TYPE bloom_filter(0.01) GRANULARITY 1;
+ALTER TABLE sapling_nullifiers ADD INDEX IF NOT EXISTS idx_is_valid (is_valid) TYPE set(2) GRANULARITY 1;
+
+
+-- Add Sapling tree root to blocks table
+ALTER TABLE blocks ADD COLUMN IF NOT EXISTS sapling_root FixedString(64) DEFAULT '' CODEC(ZSTD(3));
+
+
+-- ============================================================================
 -- MATERIALIZED VIEW: Real-time transaction count per hour (for charts)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS mv_hourly_tx_count (

@@ -1173,6 +1173,19 @@ function ensureAvailable(buffer: Buffer, offset: number, bytesNeeded: number, fi
   }
 }
 
+export interface SaplingCommitmentData {
+  output_index: number;
+  cmu: string;
+  ephemeral_key: string;
+  enc_ciphertext: string;
+}
+
+export interface SaplingNullifierData {
+  spend_index: number;
+  nullifier: string;
+  anchor: string;
+}
+
 /**
  * Parse transaction hex to extract JoinSplit and Sapling shielded data
  * Returns minimal transaction data with shielded components populated
@@ -1182,6 +1195,8 @@ export function parseTransactionShieldedData(txHex: string): {
   version: number;
   vjoinsplit?: Array<{ vpub_old: bigint; vpub_new: bigint }>;
   valueBalance?: bigint;
+  saplingCommitments?: SaplingCommitmentData[];
+  saplingNullifiers?: SaplingNullifierData[];
 } {
   const buffer = Buffer.from(txHex, 'hex');
   let offset = 0;
@@ -1231,6 +1246,8 @@ export function parseTransactionShieldedData(txHex: string): {
 
   let valueBalance: bigint | undefined;
   const vjoinsplit: Array<{ vpub_old: bigint; vpub_new: bigint }> = [];
+  const saplingNullifiers: SaplingNullifierData[] = [];
+  const saplingCommitments: SaplingCommitmentData[] = [];
 
   // Sapling v4 transaction handling
   if (isSaplingV4) {
@@ -1246,18 +1263,30 @@ export function parseTransactionShieldedData(txHex: string): {
       valueBalance = valueBalanceBytes;
       offset += 8;
 
-      // Skip vShieldedSpend
+      // Extract vShieldedSpend data
       const { value: nShieldedSpend, size: spendVarIntSize } = readVarInt(buffer, offset);
       offset += spendVarIntSize;
       for (let i = 0; i < nShieldedSpend; i++) {
-        offset += 384; // Each spend is 384 bytes
+        offset += 32;  // cv
+        const anchor = buffer.subarray(offset, offset + 32).toString('hex'); offset += 32;
+        const nullifier = buffer.subarray(offset, offset + 32).toString('hex'); offset += 32;
+        offset += 32;  // rk
+        offset += 192; // zkproof
+        offset += 64;  // spendAuthSig
+        saplingNullifiers.push({ spend_index: i, nullifier, anchor });
       }
 
-      // Skip vShieldedOutput
+      // Extract vShieldedOutput data
       const { value: nShieldedOutput, size: outputVarIntSize } = readVarInt(buffer, offset);
       offset += outputVarIntSize;
       for (let i = 0; i < nShieldedOutput; i++) {
-        offset += 948; // Each output is 948 bytes
+        offset += 32;  // cv
+        const cmu = buffer.subarray(offset, offset + 32).toString('hex'); offset += 32;
+        const ephemeral_key = buffer.subarray(offset, offset + 32).toString('hex'); offset += 32;
+        offset += 192; // zkproof
+        const enc_ciphertext = buffer.subarray(offset, offset + 580).toString('hex'); offset += 580;
+        offset += 80;  // outCiphertext
+        saplingCommitments.push({ output_index: i, cmu, ephemeral_key, enc_ciphertext });
       }
     }
   }
@@ -1304,5 +1333,7 @@ export function parseTransactionShieldedData(txHex: string): {
     version: versionNumber,
     vjoinsplit: vjoinsplit.length > 0 ? vjoinsplit : undefined,
     valueBalance,
+    saplingCommitments: saplingCommitments.length > 0 ? saplingCommitments : undefined,
+    saplingNullifiers: saplingNullifiers.length > 0 ? saplingNullifiers : undefined,
   };
 }
