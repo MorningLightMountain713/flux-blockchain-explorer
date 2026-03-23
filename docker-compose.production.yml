@@ -19,7 +19,7 @@ services:
   # ClickHouse Database (columnar storage optimized for blockchain data)
   # Uses official ClickHouse image - bootstrap is handled by the indexer container
   clickhouse:
-    image: clickhouse/clickhouse-server:24.3-alpine
+    image: clickhouse/clickhouse-server:26-alpine
     container_name: fluxindexer-clickhouse
     restart: unless-stopped
     environment:

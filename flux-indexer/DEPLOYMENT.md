@@ -58,7 +58,7 @@ The `docker-compose.production.yml` file contains the complete production stack:
 services:
   # Official ClickHouse image with custom memory config
   clickhouse:
-    image: clickhouse/clickhouse-server:24.3-alpine
+    image: clickhouse/clickhouse-server:26-alpine
     container_name: fluxindexer-clickhouse
     ports:
       - "127.0.0.1:8123:8123"   # HTTP interface (local only)
@@ -149,7 +149,7 @@ docker run -d \
   -e CLICKHOUSE_USER=fluxindexer \
   -e CLICKHOUSE_PASSWORD=your_password \
   -e CLICKHOUSE_DB=fluxindexer \
-  clickhouse/clickhouse-server:24.3-alpine
+  clickhouse/clickhouse-server:26-alpine
 
 # Start Indexer (bundled daemon + indexer)
 docker run -d \

@@ -10,7 +10,7 @@
     {
       "name": "clickhouse",
       "description": "ClickHouse database (~61GB final, 120GB with bootstrap overhead). Needs 16GB+ RAM to handle merge spikes safely.",
-      "repotag": "clickhouse/clickhouse-server:24.3-alpine",
+      "repotag": "clickhouse/clickhouse-server:26-alpine",
       "ports": [8123],
       "containerPorts": [8123],
       "domains": [""],
