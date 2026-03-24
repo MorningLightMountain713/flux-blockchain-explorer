@@ -149,6 +149,9 @@ export class ClickHouseAPIServer {
         sync_percentage: number;
       }>('SELECT current_height, chain_height, is_syncing, sync_percentage FROM sync_state FINAL WHERE id = 1');
 
+      // Approximate counts — count() on ReplacingMergeTree may include
+      // un-merged duplicates (typically <0.03% during sync, zero at steady state).
+      // Exact counts via uniqExact/FINAL are too expensive (51s+ on 115M rows).
       const blockCount = syncState?.current_height ?? 0;
       const txCount = await this.ch.queryCount('SELECT count() as count FROM transactions');
       const addressCount = await this.ch.queryCount('SELECT count() as count FROM address_summary');
