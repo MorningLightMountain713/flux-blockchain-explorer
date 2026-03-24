@@ -149,9 +149,8 @@ export class ClickHouseAPIServer {
         sync_percentage: number;
       }>('SELECT current_height, chain_height, is_syncing, sync_percentage FROM sync_state FINAL WHERE id = 1');
 
-      // Derive counts from existing aggregations — no full table scans
       const blockCount = syncState?.current_height ?? 0;
-      const txCount = await this.ch.queryCount('SELECT sum(tx_count) as count FROM mv_hourly_tx_count');
+      const txCount = await this.ch.queryCount('SELECT count() as count FROM transactions');
       const addressCount = await this.ch.queryCount('SELECT count() as count FROM address_summary');
 
       const currentHeight = syncState?.current_height ?? 0;
