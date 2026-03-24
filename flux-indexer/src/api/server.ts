@@ -68,6 +68,7 @@ export class ClickHouseAPIServer {
     this.app.get('/api/v1/addresses/:address', this.getAddress.bind(this));
     this.app.get('/api/v1/addresses/:address/transactions', this.getAddressTransactions.bind(this));
     this.app.get('/api/v1/addresses/:address/utxos', this.getAddressUTXOs.bind(this));
+    this.app.post('/api/v1/addresses/utxos', this.getMultiAddressUTXOs.bind(this));
 
     // Rich list
     this.app.get('/api/v1/richlist', this.getRichList.bind(this));
@@ -1198,6 +1199,47 @@ export class ClickHouseAPIServer {
         utxos: utxos.map(u => ({
           txid: u.txid,  // Keep full 64-char txid
           vout: u.vout,
+          value: Number(u.value) / 1e8,
+          valueSat: u.value,
+          scriptType: u.script_type,
+          blockHeight: u.block_height,
+        })),
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  private async getMultiAddressUTXOs(req: Request, res: Response): Promise<void> {
+    try {
+      const { addresses } = req.body;
+
+      if (!Array.isArray(addresses) || addresses.length === 0) {
+        res.status(400).json({ error: 'addresses array is required' });
+        return;
+      }
+
+      if (addresses.length > 100) {
+        res.status(400).json({ error: 'Maximum 100 addresses per batch' });
+        return;
+      }
+
+      const inClause = addresses.map((a: string) => `'${a}'`).join(', ');
+
+      const utxos = await this.ch.query<any>(`
+        SELECT txid, vout, address, value, script_type, block_height
+        FROM utxos
+        WHERE address IN (${inClause}) AND spent = 0
+        GROUP BY txid, vout, address, value, script_type, block_height
+        ORDER BY block_height DESC
+        LIMIT 10000
+      `);
+
+      res.json({
+        utxos: utxos.map(u => ({
+          txid: u.txid,
+          vout: u.vout,
+          address: u.address,
           value: Number(u.value) / 1e8,
           valueSat: u.value,
           scriptType: u.script_type,
