@@ -149,12 +149,10 @@ export class ClickHouseAPIServer {
         sync_percentage: number;
       }>('SELECT current_height, chain_height, is_syncing, sync_percentage FROM sync_state FINAL WHERE id = 1');
 
-      // Use uniqExact() for accurate counts without expensive FINAL
-      // This counts unique primary key combinations without full table deduplication
-      const blockCount = await this.ch.queryCount('SELECT uniqExact(height) as count FROM blocks WHERE is_valid = 1');
-      const txCount = await this.ch.queryCount('SELECT uniqExact(txid, block_height) as count FROM transactions WHERE is_valid = 1');
-      // Count unique addresses from aggregated table - use uniqExact() for efficiency
-      const addressCount = await this.ch.queryCount('SELECT uniqExact(address) as count FROM address_summary_agg');
+      // Derive counts from existing aggregations — no full table scans
+      const blockCount = syncState?.current_height ?? 0;
+      const txCount = await this.ch.queryCount('SELECT sum(tx_count) as count FROM mv_hourly_tx_count');
+      const addressCount = await this.ch.queryCount('SELECT count() as count FROM address_summary');
 
       const currentHeight = syncState?.current_height ?? 0;
       const chainHeight = chainInfo?.headers ?? syncState?.chain_height ?? 0;
