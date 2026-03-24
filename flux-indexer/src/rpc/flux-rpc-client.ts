@@ -541,6 +541,10 @@ export class FluxRPCClient {
   /**
    * Estimate fee
    */
+  async sendRawTransaction(rawtx: string): Promise<string> {
+    return this.call<string>('sendrawtransaction', [rawtx]);
+  }
+
   async estimateFee(nblocks: number = 6): Promise<number> {
     try {
       return await this.call('estimatefee', [nblocks]);

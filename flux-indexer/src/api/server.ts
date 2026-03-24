@@ -60,6 +60,7 @@ export class ClickHouseAPIServer {
     this.app.get('/api/v1/blocks/:heightOrHash', this.getBlock.bind(this));
 
     // Transaction endpoints
+    this.app.post('/api/v1/transactions/broadcast', this.broadcastTransaction.bind(this));
     this.app.post('/api/v1/transactions/batch', this.getTransactionsBatch.bind(this));
     this.app.get('/api/v1/transactions/:txid', this.getTransaction.bind(this));
 
@@ -780,6 +781,21 @@ export class ClickHouseAPIServer {
       res.json({ transactions: orderedResults });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  }
+
+  private async broadcastTransaction(req: Request, res: Response): Promise<void> {
+    try {
+      const { rawtx } = req.body;
+      if (!rawtx || typeof rawtx !== 'string') {
+        res.status(400).json({ error: 'Missing or invalid "rawtx" field' });
+        return;
+      }
+      const result = await this.rpc.sendRawTransaction(rawtx);
+      res.json({ txid: result });
+    } catch (error: any) {
+      const msg = error?.message || String(error);
+      res.status(400).json({ error: msg });
     }
   }
 
