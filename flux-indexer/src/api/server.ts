@@ -1942,8 +1942,13 @@ export class ClickHouseAPIServer {
 
   private async getSaplingCommitments(req: Request, res: Response): Promise<void> {
     try {
+      const syncState = await this.ch.queryOne<{ current_height: number }>(
+        'SELECT current_height FROM sync_state FINAL WHERE id = 1',
+      );
+      const chainHeight = syncState?.current_height ?? 0;
+
       const from = parseInt(req.query.from as string) || 250000;
-      const to = parseInt(req.query.to as string) || 99999999;
+      const to = parseInt(req.query.to as string) || chainHeight;
       const limit = Math.min(parseInt(req.query.limit as string) || 10000, 100000);
       const offset = parseInt(req.query.offset as string) || 0;
 
@@ -1963,7 +1968,7 @@ export class ClickHouseAPIServer {
         ORDER BY block_height ASC, txid ASC, output_index ASC
         LIMIT {limit:UInt32} OFFSET {offset:UInt32}
       `, { from, to, limit, offset });
-      res.json({ commitments: rows, count: rows.length });
+      res.json({ commitments: rows, count: rows.length, chain_height: chainHeight });
     } catch (error) {
       res.status(500).json({ error: 'Failed to fetch Sapling commitments' });
     }
@@ -1971,8 +1976,13 @@ export class ClickHouseAPIServer {
 
   private async getSaplingNullifiers(req: Request, res: Response): Promise<void> {
     try {
+      const syncState = await this.ch.queryOne<{ current_height: number }>(
+        'SELECT current_height FROM sync_state FINAL WHERE id = 1',
+      );
+      const chainHeight = syncState?.current_height ?? 0;
+
       const from = parseInt(req.query.from as string) || 250000;
-      const to = parseInt(req.query.to as string) || 99999999;
+      const to = parseInt(req.query.to as string) || chainHeight;
       const limit = Math.min(parseInt(req.query.limit as string) || 10000, 100000);
       const offset = parseInt(req.query.offset as string) || 0;
 
@@ -1991,7 +2001,7 @@ export class ClickHouseAPIServer {
         ORDER BY block_height ASC, txid ASC, spend_index ASC
         LIMIT {limit:UInt32} OFFSET {offset:UInt32}
       `, { from, to, limit, offset });
-      res.json({ nullifiers: rows, count: rows.length });
+      res.json({ nullifiers: rows, count: rows.length, chain_height: chainHeight });
     } catch (error) {
       res.status(500).json({ error: 'Failed to fetch Sapling nullifiers' });
     }
