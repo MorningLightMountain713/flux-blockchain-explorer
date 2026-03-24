@@ -1187,12 +1187,16 @@ export class ClickHouseAPIServer {
       const limit = Math.min(parseInt(req.query.limit as string) || 1000, 10000);
       const offset = parseInt(req.query.offset as string) || 0;
 
-      // Use GROUP BY to deduplicate without expensive FINAL
+      // argMax resolves ReplacingMergeTree duplicates without expensive FINAL
       const utxos = await this.ch.query<any>(`
-        SELECT txid, vout, value, script_type, block_height
+        SELECT txid, vout,
+               argMax(value, version) as value,
+               argMax(script_type, version) as script_type,
+               argMax(block_height, version) as block_height
         FROM utxos
-        WHERE address = {address:String} AND spent = 0
-        GROUP BY txid, vout, value, script_type, block_height
+        WHERE address = {address:String}
+        GROUP BY txid, vout
+        HAVING argMax(spent, version) = 0
         ORDER BY block_height DESC
         LIMIT {limit:UInt32} OFFSET {offset:UInt32}
       `, { address, limit, offset });
@@ -1230,11 +1234,16 @@ export class ClickHouseAPIServer {
       const limit = Math.min(parseInt(req.query.limit as string) || 1000, 10000);
       const offset = parseInt(req.query.offset as string) || 0;
 
+      // argMax resolves ReplacingMergeTree duplicates without expensive FINAL
       const utxos = await this.ch.query<any>(`
-        SELECT txid, vout, address, value, script_type, block_height
+        SELECT txid, vout, address,
+               argMax(value, version) as value,
+               argMax(script_type, version) as script_type,
+               argMax(block_height, version) as block_height
         FROM utxos
-        WHERE address IN (${inClause}) AND spent = 0
-        GROUP BY txid, vout, address, value, script_type, block_height
+        WHERE address IN (${inClause})
+        GROUP BY txid, vout, address
+        HAVING argMax(spent, version) = 0
         ORDER BY block_height DESC
         LIMIT {limit:UInt32} OFFSET {offset:UInt32}
       `, { limit, offset });
