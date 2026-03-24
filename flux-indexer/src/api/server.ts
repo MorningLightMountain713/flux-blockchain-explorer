@@ -1187,6 +1187,11 @@ export class ClickHouseAPIServer {
       const limit = Math.min(parseInt(req.query.limit as string) || 1000, 10000);
       const offset = parseInt(req.query.offset as string) || 0;
 
+      const syncState = await this.ch.queryOne<{ current_height: number }>(
+        'SELECT current_height FROM sync_state FINAL WHERE id = 1',
+      );
+      const chainHeight = syncState?.current_height ?? 0;
+
       // argMax resolves ReplacingMergeTree duplicates without expensive FINAL
       const utxos = await this.ch.query<any>(`
         SELECT txid, vout,
@@ -1203,13 +1208,15 @@ export class ClickHouseAPIServer {
 
       res.json({
         utxos: utxos.map(u => ({
-          txid: u.txid,  // Keep full 64-char txid
+          txid: u.txid,
           vout: u.vout,
           value: Number(u.value) / 1e8,
           valueSat: u.value,
           scriptType: u.script_type,
           blockHeight: u.block_height,
+          confirmations: chainHeight > 0 ? Math.max(chainHeight - u.block_height, 0) : 0,
         })),
+        chain_height: chainHeight,
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1229,6 +1236,11 @@ export class ClickHouseAPIServer {
         res.status(400).json({ error: 'Maximum 100 addresses per batch' });
         return;
       }
+
+      const syncState = await this.ch.queryOne<{ current_height: number }>(
+        'SELECT current_height FROM sync_state FINAL WHERE id = 1',
+      );
+      const chainHeight = syncState?.current_height ?? 0;
 
       const inClause = addresses.map((a: string) => `'${a}'`).join(', ');
       const limit = Math.min(parseInt(req.query.limit as string) || 1000, 10000);
@@ -1257,7 +1269,9 @@ export class ClickHouseAPIServer {
           valueSat: u.value,
           scriptType: u.script_type,
           blockHeight: u.block_height,
+          confirmations: chainHeight > 0 ? Math.max(chainHeight - u.block_height, 0) : 0,
         })),
+        chain_height: chainHeight,
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
