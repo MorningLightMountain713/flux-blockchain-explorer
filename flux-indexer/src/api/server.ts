@@ -1184,6 +1184,8 @@ export class ClickHouseAPIServer {
   private async getAddressUTXOs(req: Request, res: Response): Promise<void> {
     try {
       const { address } = req.params;
+      const limit = Math.min(parseInt(req.query.limit as string) || 1000, 10000);
+      const offset = parseInt(req.query.offset as string) || 0;
 
       // Use GROUP BY to deduplicate without expensive FINAL
       const utxos = await this.ch.query<any>(`
@@ -1192,8 +1194,8 @@ export class ClickHouseAPIServer {
         WHERE address = {address:String} AND spent = 0
         GROUP BY txid, vout, value, script_type, block_height
         ORDER BY block_height DESC
-        LIMIT 1000
-      `, { address });
+        LIMIT {limit:UInt32} OFFSET {offset:UInt32}
+      `, { address, limit, offset });
 
       res.json({
         utxos: utxos.map(u => ({
@@ -1225,6 +1227,8 @@ export class ClickHouseAPIServer {
       }
 
       const inClause = addresses.map((a: string) => `'${a}'`).join(', ');
+      const limit = Math.min(parseInt(req.query.limit as string) || 1000, 10000);
+      const offset = parseInt(req.query.offset as string) || 0;
 
       const utxos = await this.ch.query<any>(`
         SELECT txid, vout, address, value, script_type, block_height
@@ -1232,8 +1236,8 @@ export class ClickHouseAPIServer {
         WHERE address IN (${inClause}) AND spent = 0
         GROUP BY txid, vout, address, value, script_type, block_height
         ORDER BY block_height DESC
-        LIMIT 10000
-      `);
+        LIMIT {limit:UInt32} OFFSET {offset:UInt32}
+      `, { limit, offset });
 
       res.json({
         utxos: utxos.map(u => ({
