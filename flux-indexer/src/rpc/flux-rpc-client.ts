@@ -71,14 +71,21 @@ export class FluxRPCClient {
 
       clearTimeout(timeoutId);
 
+      const data = await response.json() as RPCResponse<T>;
+
       if (!response.ok) {
+        if (data.error) {
+          throw new RPCError(
+            data.error.message,
+            data.error.code,
+            { method, params }
+          );
+        }
         throw new RPCError(
           `HTTP ${response.status}: ${response.statusText}`,
           response.status
         );
       }
-
-      const data = await response.json() as RPCResponse<T>;
 
       if (data.error) {
         throw new RPCError(
